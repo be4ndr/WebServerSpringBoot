@@ -6,8 +6,8 @@ import com.helger.css.decl.CSSImportRule;
 import com.helger.css.decl.ICSSTopLevelRule;
 import com.helger.css.decl.visit.ICSSUrlVisitor;
 
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
 
 public class CSSUrlVisitor implements ICSSUrlVisitor {
     private String baseUri;

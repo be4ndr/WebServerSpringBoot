@@ -8,14 +8,14 @@ import com.helger.css.writer.CSSWriter;
 import com.helger.css.writer.CSSWriterSettings;
 import org.eclipse.jetty.client.api.Response;
 import org.eclipse.jetty.http.HttpHeader;
-import org.eclipse.jetty.proxy.AsyncMiddleManServlet;
+import org.eclipse.jetty.ee10.proxy.AsyncMiddleManServlet;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;

@@ -1,48 +1,32 @@
-
 package WebServer;
 
-import org.testng.annotations.BeforeMethod;
-import org.testng.annotations.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
-import static org.testng.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
-public class ReplaceInputStreamTest {
+class ReplaceInputStreamTest {
 
-    private byte[] bytes;
-    private ByteArrayInputStream bis;
-    private ReplaceInputStream ris;
-    private ByteArrayOutputStream bos;
+    @ParameterizedTest
+    @CsvSource({
+            "hello zxy world.|zxy|abc|hello abc world.",
+            "hello xyz world.|xyz||hello  world."
+    })
+    void shouldReplaceInputStreamContent(String input, String search, String replacement, String expected) throws IOException {
+        ByteArrayInputStream source = new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8));
+        ReplaceInputStream stream = new ReplaceInputStream(source, search, replacement);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
 
-    @BeforeMethod
-    public void beforeTest() throws Exception {
-        bytes = "hello zxy world.".getBytes("UTF-8");
-        bis = new ByteArrayInputStream(bytes);
-    }
+        int value;
+        while ((value = stream.read()) != -1) {
+            output.write(value);
+        }
 
-    @Test
-    public void testReplacingInputStream() throws Exception {
-        ris = new ReplaceInputStream(bis, "zxy", "abc");
-        bos = new ByteArrayOutputStream();
-        int b;
-        while (-1 != (b = ris.read()))
-            bos.write(b);
-        assertEquals("hello abc world.", bos.toString());
-    }
-
-
-    @Test
-    public void testReplacingToEmptyString() throws Exception {
-        ris = new ReplaceInputStream(bis, "xyz", "");
-        bos = new ByteArrayOutputStream();
-
-        int b;
-        while (-1 != (b = ris.read()))
-            bos.write(b);
-
-        assertEquals("hello  world.", bos.toString());
+        assertEquals(expected, output.toString(StandardCharsets.UTF_8));
     }
 }
-
