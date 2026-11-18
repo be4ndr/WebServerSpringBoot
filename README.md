@@ -12,13 +12,13 @@ A Spring Boot + Jetty-based web proxy server that rewrites HTML/CSS resource URL
 
 ## Requirements
 
-- Java 17+
-- Maven 3.9+
+- Java 25 LTS
+- Maven 3.10.1
 
 ## Build & Test
 
 ```bash
-mvn test
+mvn clean verify
 ```
 
 ## Run
@@ -27,7 +27,9 @@ mvn test
 mvn spring-boot:run
 ```
 
-By default, the application starts using the Spring Boot configuration in this repository.
+The application listens on `127.0.0.1:8090` by default. Use `server.port` to change the port.
+The proxy accepts arbitrary HTTP(S) destinations and serves upstream content on its own origin.
+Keep it on loopback for trusted local use.
 
 ## Project Structure
 

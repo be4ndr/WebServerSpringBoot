@@ -1,16 +1,12 @@
 package WebServer;
 
-import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.web.servlet.ServletRegistrationBean;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 
 import java.util.Collections;
 
 @Configuration
-@ComponentScan(value = "WebServer")
-@EnableAutoConfiguration
 public class AppConfig {
 
     @Bean

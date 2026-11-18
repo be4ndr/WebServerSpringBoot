@@ -1,155 +1,152 @@
 package WebServer;
 
-import com.helger.css.ECSSVersion;
 import com.helger.css.decl.CascadingStyleSheet;
-import com.helger.css.decl.visit.*;
+import com.helger.css.decl.visit.CSSVisitor;
 import com.helger.css.reader.CSSReader;
 import com.helger.css.writer.CSSWriter;
 import com.helger.css.writer.CSSWriterSettings;
-import org.eclipse.jetty.client.api.Response;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.eclipse.jetty.client.Response;
+import org.eclipse.jetty.ee11.proxy.AsyncMiddleManServlet;
 import org.eclipse.jetty.http.HttpHeader;
-import org.eclipse.jetty.ee10.proxy.AsyncMiddleManServlet;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
-import org.jsoup.select.Elements;
+import org.springframework.http.MediaType;
 
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public class PageContentTransformer implements AsyncMiddleManServlet.ContentTransformer {
-    private final AtomicInteger total = new AtomicInteger();
-    private final List<ByteBuffer> buffers = new ArrayList<>();
+    private static final int MAX_TRANSFORM_BYTES = 4 * 1024 * 1024;
+
     private final HttpServletRequest clientRequest;
     private final HttpServletResponse proxyResponse;
     private final Response serverResponse;
-    private CSSWriter cssWriter = new CSSWriter(new CSSWriterSettings().setOptimizedOutput(true));
+    private ByteArrayOutputStream bufferedContent = new ByteArrayOutputStream();
 
-    public PageContentTransformer(HttpServletRequest clientRequest, HttpServletResponse proxyResponse, Response serverResponse) {
-
+    public PageContentTransformer(HttpServletRequest clientRequest, HttpServletResponse proxyResponse,
+            Response serverResponse) {
         this.clientRequest = clientRequest;
         this.proxyResponse = proxyResponse;
         this.serverResponse = serverResponse;
     }
 
+    static boolean canTransform(Response response) {
+        List<String> encodings = response.getHeaders().getValuesList(HttpHeader.CONTENT_ENCODING);
+        if (response.getStatus() != HttpServletResponse.SC_OK || contentType(response) == null) {
+            return false;
+        }
+        if (encodings.size() == 1 && "gzip".equalsIgnoreCase(encodings.getFirst())) {
+            return true;
+        }
+        return (encodings.isEmpty() || (encodings.size() == 1 && "identity".equalsIgnoreCase(encodings.getFirst())))
+                && response.getHeaders().getLongField(HttpHeader.CONTENT_LENGTH) <= MAX_TRANSFORM_BYTES;
+    }
+
+    private boolean isGzip() {
+        return "gzip".equalsIgnoreCase(serverResponse.getHeaders().get(HttpHeader.CONTENT_ENCODING));
+    }
+
+    private void removeRepresentationHeaders() {
+        // These headers describe the upstream bytes and cannot be reused after rewriting or recompression.
+        for (String header : List.of("ETag", "Content-Range", "Content-MD5", "Digest", "Content-Digest", "Repr-Digest")) {
+            proxyResponse.setHeader(header, null);
+        }
+    }
+
+    private static MediaType contentType(Response response) {
+        String header = response.getHeaders().get(HttpHeader.CONTENT_TYPE);
+        if (header == null) {
+            return null;
+        }
+        try {
+            MediaType type = MediaType.parseMediaType(header);
+            return MediaType.TEXT_HTML.equalsTypeAndSubtype(type)
+                    || "text/css".equalsIgnoreCase(type.getType() + "/" + type.getSubtype()) ? type : null;
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
+    }
+
+    @Override
     public void transform(ByteBuffer input, boolean finished, List<ByteBuffer> output) throws IOException {
-        ByteBuffer copy = ByteBuffer.allocate(input.remaining());
-        copy.put(input).flip();
-        buffers.add(copy);
-        total.addAndGet(copy.remaining());
+        if (bufferedContent != null && input.remaining() > MAX_TRANSFORM_BYTES - bufferedContent.size()) {
+            if (isGzip()) {
+                removeRepresentationHeaders();
+            }
+            output.add(ByteBuffer.wrap(bufferedContent.toByteArray()));
+            bufferedContent = null;
+        }
+        if (bufferedContent == null) {
+            output.add(input);
+            return;
+        }
+
+        byte[] chunk = new byte[input.remaining()];
+        input.get(chunk);
+        bufferedContent.writeBytes(chunk);
         if (finished) {
-            ByteBuffer complete = ByteBuffer.allocate(total.get());
-            for (ByteBuffer buffer : buffers) {
-                complete.put(buffer);
-            }
-            complete.flip();
-            String converted = byteBufferToString(complete);
-/*            ByteBuffer replaced = transformHtml(converted);
-            output.add(replaced);*/
-            ByteBuffer replaced = null;
-            if (isHtml()) {
-                replaced = transformHtml(converted);
-            } else if (isCss()) {
-                replaced = transformCss(converted);
+            byte[] original = bufferedContent.toByteArray();
+            bufferedContent = null;
+            MediaType type = contentType(serverResponse);
+            Charset charset = type.getCharset();
+            String transformed;
+            if (MediaType.TEXT_HTML.equalsTypeAndSubtype(type)) {
+                Document doc = Jsoup.parse(new ByteArrayInputStream(original),
+                        charset == null ? null : charset.name(), "");
+                charset = doc.charset();
+                transformed = transformHtml(doc);
             } else {
-                replaced = complete;
+                if (charset == null) {
+                    charset = StandardCharsets.UTF_8;
+                }
+                transformed = transformCss(new String(original, charset));
             }
-            output.add(replaced);
+            if (transformed != null) {
+                proxyResponse.setContentType(new MediaType(type, charset).toString());
+                output.add(ByteBuffer.wrap(transformed.getBytes(charset)));
+            } else {
+                output.add(ByteBuffer.wrap(original));
+            }
+            if (transformed != null || isGzip()) {
+                removeRepresentationHeaders();
+            }
         }
     }
 
-    ByteBuffer transformCss(String input) throws IOException {
-        String baseUri = clientRequest.getRequestURL() + "?url=";
-        String origSiteName = clientRequest.getQueryString();
-        String originUri = "";
-        Pattern p = Pattern.compile("(http|https)://+[a-z,0-9]*\\.[a-z]*/");
-        Matcher m = p.matcher(origSiteName);
-        if (m.find()) {
-            originUri = origSiteName.substring(m.start(), m.end());
+    private String transformCss(String input) {
+        CascadingStyleSheet css = CSSReader.readFromString(input);
+        if (css == null) {
+            return null;
         }
-        CascadingStyleSheet css = createCssModel(input);
-        CSSVisitor.visitCSSUrl(css, new CSSUrlVisitor(baseUri, originUri));
-        String cssString = cssWriter.getCSSAsString(css);
-        return stringToByteBuffer(cssString);
+        CSSVisitor.visitCSSUrl(css, new CSSUrlVisitor(proxyPrefix(), clientRequest.getParameter("url")));
+        return new CSSWriter(new CSSWriterSettings().setOptimizedOutput(true)).getCSSAsString(css);
     }
 
-/*    CascadingStyleSheet modifyCss (CascadingStyleSheet css) {
-        WebServer.CSSUrlVisitor urlVisitor;
-
-
-    }*/
-
-
-    private CascadingStyleSheet createCssModel(String cssText) {
-        CascadingStyleSheet css = CSSReader.readFromString(cssText, ECSSVersion.LATEST);
-        return css;
-    }
-
-
-    private boolean isCss() {
-        return serverResponse.getHeaders().get(HttpHeader.CONTENT_TYPE).contains("css");
-    }
-
-    private boolean isHtml() {
-        return serverResponse.getHeaders().get(HttpHeader.CONTENT_TYPE).contains("html");
-    }
-
-    ByteBuffer transformHtml(String input) throws IOException {
-        Document doc = createDomModel(input);
+    private String transformHtml(Document doc) {
         modifyElements(doc, "a[href]", "href");
         modifyElements(doc, "link[href]", "href");
         modifyElements(doc, "img[src]", "src");
-        modifyElements(doc, "svg[xmlns]", "xmlns");
         modifyElements(doc, "iframe[src]", "src");
-        String htmlString = doc.toString();
-        return stringToByteBuffer(htmlString);
+        return doc.toString();
     }
 
     protected void modifyElements(Document doc, String cssQuery, String attributeKey) {
-        String baseUri = clientRequest.getRequestURL() + "?url=";
-        String siteName = clientRequest.getQueryString();
-        Elements query = doc.select(cssQuery);
-        siteName = siteName.replace("url=", "");
-        for (Element link : query.toArray(new Element[0])) {
-            String attributeValue = link.attr(attributeKey).toLowerCase();
-            link.attr(attributeKey, UrlUtils.modifyURI(baseUri, siteName, attributeValue));
+        String baseUri = proxyPrefix();
+        String target = clientRequest.getParameter("url");
+        for (Element element : doc.select(cssQuery)) {
+            element.attr(attributeKey, UrlUtils.modifyURI(baseUri, target, element.attr(attributeKey)));
         }
     }
 
-
-    protected String extractURI(HttpServletRequest request) {
-        StringBuffer requestURL = request.getRequestURL();
-        if (request.getQueryString() != null) {
-            requestURL.append("?").append(request.getQueryString());
-        }
-        return requestURL.toString();
+    private String proxyPrefix() {
+        return clientRequest.getRequestURI() + "?url=";
     }
-
-    private Document createDomModel(String converted) {
-        return Jsoup.parse(converted);
-    }
-
-    protected String byteBufferToString(ByteBuffer input) throws IOException {
-        String converted = new String(input.array(), proxyResponse.getCharacterEncoding());
-        return converted;
-    }
-
-    protected ByteBuffer stringToByteBuffer(String msg) {
-        ByteBuffer bb = null;
-        try {
-            bb = ByteBuffer.wrap(msg.getBytes(proxyResponse.getCharacterEncoding()));
-        } catch (UnsupportedEncodingException e) {
-            e.printStackTrace();
-        }
-        return bb;
-    }
-
 }

@@ -1,6 +1,5 @@
 package WebServer;
 
-import com.helger.css.ECSSVersion;
 import com.helger.css.decl.CascadingStyleSheet;
 import com.helger.css.decl.visit.CSSVisitor;
 import com.helger.css.reader.CSSReader;
@@ -23,7 +22,7 @@ class CSSUrlVisitorTest {
         CSSWriterSettings settings = new CSSWriterSettings();
         settings.setOptimizedOutput(true);
 
-        CascadingStyleSheet css = CSSReader.readFromString(originCss, ECSSVersion.LATEST);
+        CascadingStyleSheet css = CSSReader.readFromString(originCss);
         CSSVisitor.visitCSSUrl(css, new CSSUrlVisitor("http://test.com?url=", "http://querytest.com/"));
 
         String actualCss = new CSSWriter(settings).getCSSAsString(css);

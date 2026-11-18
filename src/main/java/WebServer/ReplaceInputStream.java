@@ -3,26 +3,30 @@ package WebServer;
 import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.Queue;
 
 public class ReplaceInputStream extends FilterInputStream {
-    private Queue<Integer> inQueue, outQueue;
+    private final Queue<Integer> inQueue, outQueue;
     private final byte[] search, replacement;
 
     public ReplaceInputStream(InputStream in, String search, String replacement) {
         super(in);
         this.inQueue = new LinkedList<>();
         this.outQueue = new LinkedList<>();
-        this.search = search.getBytes();
-        this.replacement = replacement.getBytes();
+        this.search = search.getBytes(StandardCharsets.UTF_8);
+        if (this.search.length == 0) {
+            throw new IllegalArgumentException("Search string must not be empty");
+        }
+        this.replacement = replacement.getBytes(StandardCharsets.UTF_8);
     }
 
     private boolean isMatchFound() {
         Iterator<Integer> iterator = inQueue.iterator();
         for (byte b : search) {
-            if (!iterator.hasNext() || b != iterator.next()) {
+            if (!iterator.hasNext() || Byte.toUnsignedInt(b) != iterator.next()) {
                 return false;
             }
         }
@@ -52,7 +56,7 @@ public class ReplaceInputStream extends FilterInputStream {
                 }
 
                 for (byte b : replacement) {
-                    outQueue.offer((int) b);
+                    outQueue.offer(Byte.toUnsignedInt(b));
                 }
             } else {
                 outQueue.add(inQueue.remove());

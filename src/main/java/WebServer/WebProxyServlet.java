@@ -1,46 +1,49 @@
 package WebServer;
 
-import org.eclipse.jetty.client.HttpClient;
-import org.eclipse.jetty.client.api.Response;
-import org.eclipse.jetty.http.HttpHeader;
-import org.eclipse.jetty.ee10.proxy.AsyncMiddleManServlet;
-import org.eclipse.jetty.util.ssl.SslContextFactory;
-
-import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.eclipse.jetty.client.Response;
+import org.eclipse.jetty.ee11.proxy.AsyncMiddleManServlet;
+import org.eclipse.jetty.http.HttpField;
+import org.eclipse.jetty.http.HttpHeader;
+
+import java.net.URI;
 
 public class WebProxyServlet extends AsyncMiddleManServlet {
 
-    private SslContextFactory contextFactory;
-
     @Override
     protected String rewriteTarget(HttpServletRequest clientRequest) {
-        return clientRequest.getParameter("url");
-    }
-
-    @Override
-    protected HttpClient createHttpClient() throws ServletException {
-        return super.createHttpClient();
-    }
-
-    @Override
-    protected HttpClient newHttpClient() {
-        return new HttpClient(contextFactory);
-    }
-
-    @Override
-    public void init() throws ServletException {
-        contextFactory = new SslContextFactory(true);
-        super.init();
-    }
-
-    @Override
-    protected ContentTransformer newServerResponseContentTransformer(HttpServletRequest clientRequest, HttpServletResponse proxyResponse, Response serverResponse) {
-        if ("gzip".equals(serverResponse.getHeaders().get(HttpHeader.CONTENT_ENCODING))) {
-            return new GZIPContentTransformer(newHttpClient(), new PageContentTransformer(clientRequest, proxyResponse, serverResponse));
+        URI target = UrlUtils.httpUri(clientRequest.getParameter("url"));
+        if (target == null) {
+            return null;
         }
-        return new PageContentTransformer(clientRequest, proxyResponse, serverResponse);
+        int port = target.getPort();
+        if (port == -1) {
+            port = "https".equalsIgnoreCase(target.getScheme()) ? 443 : 80;
+        }
+        return validateDestination(target.getHost(), port) ? target.toASCIIString() : null;
     }
 
+    @Override
+    protected HttpField filterServerResponseHeader(HttpServletRequest request, Response response, HttpField field) {
+        if (field.getHeader() == HttpHeader.LOCATION) {
+            String baseUri = request.getRequestURI() + "?url=";
+            return new HttpField(HttpHeader.LOCATION, UrlUtils.modifyURI(
+                    baseUri, request.getParameter("url"), field.getValue()));
+        }
+        return field;
+    }
+
+    @Override
+    protected ContentTransformer newServerResponseContentTransformer(HttpServletRequest clientRequest,
+            HttpServletResponse proxyResponse, Response serverResponse) {
+        if (!PageContentTransformer.canTransform(serverResponse)) {
+            return ContentTransformer.IDENTITY;
+        }
+        ContentTransformer transformer = new PageContentTransformer(clientRequest, proxyResponse, serverResponse);
+        if ("gzip".equalsIgnoreCase(serverResponse.getHeaders().get(HttpHeader.CONTENT_ENCODING))) {
+            return new GZIPContentTransformer(transformer);
+        }
+        return transformer;
+    }
 }

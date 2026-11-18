@@ -10,8 +10,8 @@ import jakarta.annotation.Nonnull;
 import jakarta.annotation.Nullable;
 
 public class CSSUrlVisitor implements ICSSUrlVisitor {
-    private String baseUri;
-    private String originUri;
+    private final String baseUri;
+    private final String originUri;
 
     public CSSUrlVisitor(String baseUri, String originUri) {
 

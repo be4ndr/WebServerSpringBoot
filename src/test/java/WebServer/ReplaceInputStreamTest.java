@@ -13,9 +13,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class ReplaceInputStreamTest {
 
     @ParameterizedTest
-    @CsvSource({
+    @CsvSource(delimiter = '|', value = {
             "hello zxy world.|zxy|abc|hello abc world.",
-            "hello xyz world.|xyz||hello  world."
+            "hello xyz world.|xyz|''|hello  world.",
+            "café|é|ø|cafø"
     })
     void shouldReplaceInputStreamContent(String input, String search, String replacement, String expected) throws IOException {
         ByteArrayInputStream source = new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8));
